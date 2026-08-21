@@ -1,0 +1,455 @@
+---
+title: "Version1"
+format: html
+editor: visual
+---
+
+```{r}
+#| warning: false
+#| message: false
+
+library(here)
+library(ggplot2)
+library(tidyr)
+library(tidybayes)
+library(brms)
+library(tidyverse)
+library(c14bazAAR)
+
+library(survival)
+```
+
+```{r}
+dir = here::here()
+
+#Imnport data
+df <- read_csv(paste0(dir,"/data/SARD_Mar2021_14C.csv")) |>
+  mutate(Species = factor(Species)) |>
+  filter(Species != "Homo sapiens" | is.na(Species))
+```
+
+```{r}
+df_sub <- df |>
+  filter(Site %in% c("Blombos Cave", "Steenbokfontein")) |>
+  select(Site, Date, Uncertainty, `Lab ID`) |>
+  mutate(c14age = as.numeric(Date),
+         c14std = as.numeric(Uncertainty)) |>
+  as.c14_date_list() |>
+  calibrate(choices = "calprobdistr") |>
+  tidyr::unnest(cols = c("calprobdistr"))
+
+df_sub_int <- df_sub |>
+  group_by( Site, `Lab ID`) |>
+  summarize(upr = quantile(calage, 0.975),
+            lwr = quantile(calage, 0.025))
+
+
+```
+
+```{r}
+df_sub_order <- df_sub_int |>
+  arrange(lwr) |>
+  group_by(Site) |>
+  mutate(g = cumsum(c(TRUE, lwr[-1] > head(cummax(upr), -1)))) |>
+  group_by(g, Site) |>
+  mutate(max_upr = max(upr),
+         min_lwr = min(lwr)) |>
+  ungroup() |>
+  select(Site, max_upr, min_lwr) |>
+  distinct() |>
+  mutate(Event = 1,
+         Occupation = seq(1,n(),1),
+         Duration = max_upr-min_lwr)
+
+```
+
+```{r}
+surv_obj <- Surv(time = df_sub_order$Duration,
+                 event = df_sub_order$Event)
+
+surv_obj
+
+km <- survfit(
+  Surv(Duration, Event) ~ Site,
+  data = df_sub_order
+)
+
+summary(km)
+
+plot(
+  km,
+  col = 1:2,
+  lwd = 2,
+  xlab = "Occupation duration (years)",
+  ylab = "Probability occupation persists",
+  conf.int = TRUE,
+  mark.time = TRUE
+)
+
+legend(
+  "topright",
+  legend = levels(factor(df_sub_order$Site)),
+  col = 1:2,
+  lwd = 2
+)
+```
+
+# Filter by RFZ during Holocene
+
+```{r}
+df_rfz <- df |>
+  select(Site, Date, Uncertainty, `Lab ID`, RFZ, Biome, `Archaeological Period`,
+         `Archaeological Sub-chronology`) |>
+  mutate(c14age = as.numeric(Date),
+         c14std = as.numeric(Uncertainty)) |>
+  filter(c14age < 10000) |>
+  as.c14_date_list() |>
+  calibrate(choices = "calprobdistr")
+  
+  
+  tidyr::unnest(cols = c("calprobdistr")) |>
+  group_by(RFZ, Site, `Lab ID`) |>
+  summarize(upr = quantile(calage, 0.975),
+            lwr = quantile(calage, 0.025)) |>
+  
+  
+  arrange(lwr) |>
+  group_by(RFZ, Site) |>
+  mutate(g = cumsum(c(TRUE, lwr[-1] > head(cummax(upr), -1)))) |>
+  group_by(g, RFZ, Site) |>
+  mutate(max_upr = max(upr),
+         min_lwr = min(lwr)) |>
+  ungroup() |>
+  select(RFZ, Site, max_upr, min_lwr) |>
+  distinct() |>
+  mutate(Event = 1,
+         Occupation = seq(1,n(),1),
+         Duration = max_upr-min_lwr)
+```
+
+```{r}
+df_rfz <- df |>
+  select(Site, Date, Uncertainty, `Lab ID`, RFZ, Biome, `Archaeological Period`,
+         `Archaeological Sub-chronology`) |>
+  mutate(c14age = as.numeric(Date),
+         c14std = as.numeric(Uncertainty)) |>
+  filter(c14age < 10000) |>
+  as.c14_date_list() |>
+  calibrate(choices = "calprobdistr") |>
+  
+  
+  tidyr::unnest(cols = c("calprobdistr")) |>
+  group_by(RFZ, Site, Biome, `Archaeological Period`,
+         `Archaeological Sub-chronology`) |>
+  summarize(upr = quantile(calage, 0.975),
+            lwr = quantile(calage, 0.025)) |>
+  
+  
+  arrange(lwr) |>
+  group_by(RFZ, Site, Biome, `Archaeological Period`,
+         `Archaeological Sub-chronology`) |>
+  mutate(g = cumsum(c(TRUE, lwr[-1] > head(cummax(upr), -1)))) |>
+  group_by(g, RFZ, Site, Biome, `Archaeological Period`,
+         `Archaeological Sub-chronology`) |>
+  mutate(max_upr = max(upr),
+         min_lwr = min(lwr)) |>
+  ungroup() |>
+  select(Biome, `Archaeological Period`,
+         `Archaeological Sub-chronology`, RFZ, Site, max_upr, min_lwr) |>
+  distinct() |>
+  mutate(Event = 1,
+         Occupation = seq(1,n(),1),
+         Duration = max_upr-min_lwr)
+```
+
+```{r}
+df_rfz_filt <- df_rfz |>
+  filter(Duration < 2000)
+
+surv_obj <- Surv(time = df_rfz_filt$Duration,
+                 event = df_rfz_filt$Event)
+
+#surv_obj
+
+km <- survfit(
+  Surv(Duration, Event) ~ 1,
+  data = df_rfz_filt
+)
+
+summary(km)
+
+plot(
+  km,
+  lwd = 2,
+  xlab = "Occupation duration (years)",
+  ylab = "Probability occupation persists",
+  conf.int = TRUE,
+  mark.time = TRUE
+)
+
+
+```
+
+```{r}
+df_rfz_filt <- df_rfz |>
+  filter(Duration < 1000, !is.na(`Archaeological Sub-chronology`))
+
+km <- survfit(
+  Surv(Duration, Event) ~ RFZ + `Archaeological Sub-chronology`,
+  data = df_rfz_filt
+)
+
+
+survdiff(
+  Surv(Duration, Event) ~ RFZ * `Archaeological Sub-chronology`,
+  data = df_rfz_filt
+)
+```
+
+```{r}
+# fit a cox model
+cox <- coxph(
+  Surv(Duration, Event) ~ RFZ * `Archaeological Sub-chronology`,
+  data = df_rfz_filt
+)
+
+summary(cox)
+```
+
+# Covariate Analysis
+
+```{r}
+df_cov <- df |>
+  select(Site, Date, Uncertainty, `Lab ID`, RFZ, Biome, `Archaeological Period`,
+         `Archaeological Sub-chronology`) |>
+  mutate(c14age = as.numeric(Date),
+         c14std = as.numeric(Uncertainty)) |>
+  filter(c14age < 10000) |>
+  as.c14_date_list() |>
+  calibrate(choices = "calprobdistr")
+  
+df_hol <- df_cov |>
+  tidyr::unnest(cols = c("calprobdistr")) |>
+  group_by(RFZ, Site) |>
+  mutate(upr = quantile(calage, 0.975),
+            lwr = quantile(calage, 0.025)) |>
+  select(-c(density, calage)) |>
+  distinct() |>
+  
+  
+  arrange(lwr) |>
+  group_by(RFZ, Site, `Archaeological Sub-chronology`) |>
+  mutate(g = cumsum(c(TRUE, lwr[-1] > head(cummax(upr), -1)))) |>
+  group_by(g, RFZ, Site, `Archaeological Sub-chronology`) |>
+  mutate(max_upr = max(upr),
+         min_lwr = min(lwr)) |>
+  ungroup() |>
+  select(RFZ, Site, `Archaeological Sub-chronology`, max_upr, min_lwr) |>
+  distinct() |>
+  mutate(Event = 1,
+         Occupation = seq(1,n(),1),
+         Duration = max_upr-min_lwr)
+```
+
+```{r}
+df_hol_filt <- df_hol |>
+  filter(Duration < 2000)
+
+
+km <- survfit(
+  Surv(Duration, Event) ~ 1,
+  data = df_hol_filt
+)
+
+summary(km)
+
+plot(
+  km,
+  lwd = 2,
+  xlab = "Occupation duration (years)",
+  ylab = "Probability occupation persists",
+  conf.int = TRUE,
+  mark.time = TRUE
+)
+```
+
+## Rainfall Zones
+
+```{r}
+df_hol_filt <- df_hol |>
+  filter(Duration < 2000)
+
+diffs <- survdiff(
+  Surv(Duration, Event) ~ RFZ,
+  data = df_hol_filt
+)
+
+
+cox <- coxph(
+  Surv(Duration, Event) ~ RFZ,
+  data = df_hol_filt
+)
+
+summary(cox)
+```
+
+## Technocomplex
+
+```{r}
+df_hol_filt <- df_hol |>
+  filter(Duration < 2000) |>
+  rename(Tech = `Archaeological Sub-chronology`)
+
+diffs <- survdiff(
+  Surv(Duration, Event) ~ Tech,
+  data = df_hol_filt
+)
+
+
+cox <- coxph(
+  Surv(Duration, Event) ~ Tech,
+  data = df_hol_filt
+)
+
+summary(cox)
+```
+
+## RFZ and Technocomplex
+
+```{r}
+df_hol_filt <- df_hol |>
+  filter(Duration < 2000) |>
+  rename(Tech = `Archaeological Sub-chronology`)
+
+diffs <- survdiff(
+  Surv(Duration, Event) ~ RFZ + Tech,
+  data = df_hol_filt
+)
+
+
+cox <- coxph(
+  Surv(Duration, Event) ~ RFZ + Tech,
+  data = df_hol_filt
+)
+
+summary(cox)
+```
+
+# Bayesian Analysis
+
+```{r}
+df_hol_filt <- df_hol |>
+  filter(Duration < 2000 & `Archaeological Sub-chronology` != "Robberg") |>
+  rename(Tech = `Archaeological Sub-chronology`) |>
+  mutate(censored = ifelse(Event == 1, "none", "right"))
+
+fit_weibull_0 <- brm(
+  Duration | cens(censored) ~ 1,
+  data = df_hol_filt,
+  family = weibull(),
+  chains = 4,
+  iter = 4000,
+  seed = 123,
+  cores = parallel::detectCores()
+)
+
+summary(fit_weibull_0)
+# shape is > 1, so abandonment hazard increases with occupation duration
+```
+
+```{r}
+fit_weibull_tech <- brm(
+  Duration | cens(censored) ~ Tech,
+  data = df_hol_filt,
+  family = weibull(),
+  chains = 4,
+  iter = 4000,
+  seed = 1234,
+  cores = parallel::detectCores()
+)
+
+summary(fit_weibull_tech)
+```
+
+```{r}
+fit_weibull_env <- brm(
+  Duration | cens(censored) ~
+    Tech +
+    RFZ,
+  data = df_hol_filt,
+  family = weibull(),
+  chains = 4,
+  iter = 4000,
+  seed = 12345,
+  cores = parallel::detectCores()
+)
+
+summary(fit_weibull_env)
+```
+
+## Test models
+
+```{r}
+fit_exponential <- brm(
+  Duration | cens(censored) ~
+    Tech +
+    RFZ,
+  data = df_hol_filt,
+  family = exponential(),
+  chains = 4,
+  iter = 4000,
+  seed = 123456,
+  cores = parallel::detectCores()
+)
+
+summary(fit_exponential)
+```
+
+```{r}
+loo_compare(
+  loo(fit_weibull_env),
+   loo(fit_exponential)
+)
+```
+
+```{r}
+with(
+    df_hol_filt,
+    table(Tech, RFZ)
+)
+
+#Low observations may make the model fit poorly
+```
+
+```{r}
+hypothesis(fit_weibull_tech, 'shape > 1', class = "")
+```
+
+```{r}
+draws <- as_draws_df(fit_weibull_tech)
+
+industry_effect <- exp(draws$b_TechEarlyIronAge)
+
+mean(industry_effect)
+quantile(
+  industry_effect,
+  c(0.025, 0.5, 0.975)
+)
+```
+
+## Model shape paramter as random
+
+```{r}
+fit_shape_tech <- brm(
+  bf(Duration | cens(censored) ~ Tech,
+     shape ~ Tech),
+  data = df_hol_filt,
+  family = weibull(),
+  chains = 4,
+  iter = 4000,
+  cores = parallel::detectCores(),
+  seed = 777
+)
+
+summary(fit_shape_tech)
+```
