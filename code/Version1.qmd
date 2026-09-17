@@ -13,6 +13,7 @@ library(ggplot2)
 library(tidyr)
 library(tidybayes)
 library(brms)
+library(rcarbon)
 library(tidyverse)
 library(c14bazAAR)
 
@@ -24,27 +25,77 @@ library(survminer)
 dir = here::here()
 
 #Imnport data
-df <- read_csv(paste0(dir,"/data/SARD_Mar2021_14C.csv")) |>
-  mutate(Species = factor(Species)) |>
+za <- read_csv(paste0(dir,"/data/SARD_Mar2021_14C.csv")) |>
+  mutate(Species = factor(Species),
+         Date = as.numeric(Date),
+         Uncertainty = as.numeric(Uncertainty)) |>
+  rename(material = 'Material dated',
+         Technology = `Archaeological Sub-chronology`,
+         c14age = Date,
+         c14std = Uncertainty,
+         labnr = 'Lab ID') |>
   filter(Species != "Homo sapiens" | is.na(Species),
-         Date > 75)
+         c14age > 500, c14age < 30000)
 ```
 
 ```{r}
-df_sub <- df |>
-  select(Site, Date, Uncertainty, `Lab ID`, `Archaeological Sub-chronology`,
-         Biome) |>
-  rename(Technology = `Archaeological Sub-chronology`) |>
-  mutate(c14age = as.numeric(Date),
-         c14std = as.numeric(Uncertainty)) |>
-  as.c14_date_list() |>
-  calibrate(choices = "calprobdistr") |>
-  tidyr::unnest(cols = c("calprobdistr"))
+# filter by terrestrial material and apply the terrestrial calibration curve
+za_terr <- za |>
+  filter(!material %in% c('Marine shell', 'marine shell',
+                          'marine other', 'iron')) |>
+  drop_na(c14age, c14std)
 
-df_sub_int <- df_sub |>
-  group_by(Site, `Lab ID`, Technology, Biome) |>
-  summarize(upr = quantile(calage, 0.975),
-            lwr = quantile(calage, 0.025)) |>
+za_terr_cal <- rcarbon::calibrate(za_terr$c14age , za_terr$c14std,
+                                  calCurves = 'shcal20',
+                                  ids = za_terr$labnr)
+
+terr_bins <- binPrep(za_terr$Site, ages = za_terr_cal, h = 250)
+
+# filter by marine material and apply marien curve and offset
+za_marine <- za |>
+  filter(material %in% c('Marine shell', 'marine shell',
+                         'marine other')) |>
+  drop_na(c14age, c14std)
+
+za_marine_cal <- rcarbon::calibrate(za_marine$c14age, 
+                                    za_marine$c14std,
+                                    calCurves = rep('marine20',
+                                                    length(za_marine$labnr)),
+                                    resOffset = rep(187, length(za_marine$labnr)),
+                                    resErrors = rep(18, length(za_marine$labnr)),
+                                    ids = za_marine$labnr)
+
+marine_bins <- binPrep(za_marine$Site, ages = za_marine_cal, h = 250)
+
+# combine data
+za_cal <- rcarbon::combine(za_terr_cal, za_marine_cal)
+
+za_prob <- purrr::map2_dfr(
+  za_cal$grids,
+  za_cal$metadata$DateID,
+  \(x, id) {
+    x |>
+      tibble::as_tibble() |>
+      dplyr::mutate(DateID = id)
+  }
+) |>
+  dplyr::left_join(
+    za_cal$metadata |>
+      tibble::as_tibble(),
+    by = "DateID"
+  ) |>
+  dplyr::left_join(
+    za,
+    by = c("DateID" = "labnr")
+  )
+```
+
+```{r}
+
+df_sub_int <- za_prob |>
+  group_by(Site, DateID, Technology, Biome) |>
+  summarize(upr = quantile(calBP, 0.975),
+            lwr = quantile(calBP, 0.025)) |>
   filter(!is.na(Technology))
 
 
@@ -53,13 +104,13 @@ df_sub_int <- df_sub |>
 ```{r}
 df_sub_order <- df_sub_int |>
   arrange(lwr) |>
-  group_by(Site, 'Lab ID', Technology, Biome) |>
+  group_by(Site, DateID, Technology, Biome) |>
   mutate(g = cumsum(c(TRUE, lwr[-1] > head(cummax(upr), -1)))) |>
-  group_by(g, Site, 'Lab ID', Technology, Biome) |>
+  group_by(g, Site, DateID, Technology, Biome) |>
   mutate(max_upr = max(upr),
          min_lwr = min(lwr)) |>
   ungroup() |>
-  select(Site, 'Lab ID', Technology, max_upr, min_lwr, Biome) |>
+  select(Site, DateID, Technology, max_upr, min_lwr, Biome) |>
   distinct() |>
   mutate(Event = 1,
          Occupation = seq(1,n(),1),
@@ -84,7 +135,7 @@ df_sub_order <- df_sub_order |>
   mutate(period_duration = period_start - period_end,
          
          # Time from period beginning to first observed occupation
-         entry = pmax(0,period_start - max_upr),
+         entry = pmax(0, period_start - max_upr),
          # Time from period beginning to last observed occupation
          exit_raw = period_start - min_lwr,
          # Don't allow exit beyond the end of the period
@@ -98,8 +149,8 @@ df_sub_order <- df_sub_order |>
 
 ```{r}
 fit <- survfit(
-  Surv(entry, exit, event) ~ Technology + Biome,
-  data = df_sub_order |> filter(Technology == 'Oakhurst')
+  Surv(entry, exit, event) ~ Technology,
+  data = df_sub_order
 )
 
 surv_plot <- ggsurvplot(
@@ -116,30 +167,31 @@ print(surv_plot$plot)
 # Bayesian Analysis
 
 ```{r}
-wilton_df <- df_sub_order |>
-  filter(Technology == "Wilton") |>
+wilton_fit <- df_sub_order |>
+  filter(!(Technology %in% c('ELSA/transitional', 'ELSA', 'Final MSA'))) |>
+  mutate(
+    entry = pmax(0, period_start - max_upr),
+    exit_raw = period_start - min_lwr,
+    exit = pmax(0, pmin(exit_raw, period_duration)),
+    event = if_else(exit_raw > 0 & exit_raw < period_duration, 1L, 0L),
+    
+    Technology = factor(Technology),
+    Technology = droplevels(Technology),
+    
+    Biome = factor(Biome),
+    Biome = droplevels(Biome)
+  ) |>
   mutate(
     censored = if_else(event == 1, "none", "right")
   )
-
-fit_weibull_0 <- brm(
-  exit | cens(censored) ~ 1,
-  data = wilton_df,
-  family = weibull(),
-  chains = 4,
-  iter = 4000,
-  seed = 1,
-  cores = parallel::detectCores()
-)
-
-summary(fit_weibull_0)
-# shape is > 1, so abandonment hazard increases with occupation duration
 ```
+
+## Technology Analysis
 
 ```{r}
 fit_weibull_tech <- brm(
-  Duration | cens(censored) ~ Tech,
-  data = df_hol_filt,
+  Duration | cens(censored) ~ Technology,
+  data = wilton_fit,
   family = weibull(),
   chains = 4,
   iter = 4000,
@@ -151,11 +203,182 @@ summary(fit_weibull_tech)
 ```
 
 ```{r}
+draws <- as_draws_df(fit_weibull_tech)
+
+tech_draws <- draws |>
+  transmute(
+    draw = row_number(),
+    
+    shape = shape,
+    
+    Ceramic_LSA = exp(b_Intercept),
+    
+    Final_LSA = exp(
+      b_Intercept + b_TechnologyFinalLSA
+    ),
+    
+    Oakhurst = exp(
+      b_Intercept + b_TechnologyOakhurst
+    ),
+    
+    Robberg = exp(
+      b_Intercept + b_TechnologyRobberg
+    ),
+    
+    Wilton = exp(
+      b_Intercept + b_TechnologyWilton
+    )
+  ) |>
+  
+  pivot_longer(
+    cols = -c(draw, shape),
+    names_to = "Technology",
+    values_to = "scale"
+  )
+
+duration_draws <- tech_draws |>
+  mutate(
+    median_duration = scale * log(2)^(1 / shape),
+    mean_duration = scale * gamma(1 + 1 / shape)
+  )
+
+
+duration_summary <- duration_draws |>
+  group_by(Technology) |>
+  summarise(
+    median = median(median_duration),
+    median_lower = quantile(median_duration, 0.025),
+    median_upper = quantile(median_duration, 0.975),
+    
+    mean = mean(mean_duration),
+    mean_lower = quantile(mean_duration, 0.025),
+    mean_upper = quantile(mean_duration, 0.975),
+    
+    .groups = "drop"
+  )
+
+duration_summary |>
+  mutate(
+    median_duration = round(median, 0),
+    median_CrI = paste0(
+      round(median_lower, 0),
+      "–",
+      round(median_upper, 0)
+    ),
+    mean_duration = round(mean, 0),
+    mean_CrI = paste0(
+      round(mean_lower, 0),
+      "–",
+      round(mean_upper, 0)
+    )
+  ) |>
+  select(
+    Technology,
+    median_duration,
+    median_CrI,
+    mean_duration,
+    mean_CrI
+  )
+```
+
+```{r}
+duration_grid <- seq(
+  0,
+  quantile(wilton_fit$Duration, 0.99, na.rm = TRUE),
+  length.out = 300
+)
+
+survival_draws <- tech_draws |>
+  crossing(
+    Duration = duration_grid
+  ) |>
+  mutate(
+    survival = exp(
+      - (Duration / scale)^shape
+    )
+  )
+
+survival_summary <- survival_draws |>
+  group_by(Technology, Duration) |>
+  summarise(
+    estimate = median(survival),
+    lower = quantile(survival, 0.025),
+    upper = quantile(survival, 0.975),
+    .groups = "drop"
+  )
+
+ggplot(
+  survival_summary,
+  aes(
+    x = Duration,
+    y = estimate,
+    color = Technology,
+    fill = Technology
+  )
+) +
+  geom_ribbon(
+    aes(ymin = lower, ymax = upper),
+    alpha = 0.15,
+    color = NA
+  ) +
+  geom_line(linewidth = 1) +
+  geom_hline(
+    yintercept = 0.5,
+    linetype = "dashed"
+  ) +
+  geom_vline(
+    data = duration_summary,
+    aes(xintercept = median),
+    linetype = "dotted",
+    inherit.aes = FALSE
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  labs(
+    x = "Duration",
+    y = "Probability of remaining in technological phase",
+    color = "Technology",
+    fill = "Technology"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+```
+
+```{r}
+duration_draws |>
+  select(draw, Technology, median_duration) |>
+  pivot_wider(
+    names_from = Technology,
+    values_from = median_duration
+  ) |>
+  mutate(
+    Wilton_vs_Ceramic = Wilton / Ceramic_LSA,
+    Oakhurst_vs_Ceramic = Oakhurst / Ceramic_LSA,
+    Robberg_vs_Ceramic = Robberg / Ceramic_LSA,
+    Final_vs_Ceramic = Final_LSA / Ceramic_LSA
+  ) |>
+  summarise(
+    across(
+      ends_with("_Ceramic"),
+      list(
+        estimate = median,
+        lower = ~ quantile(.x, 0.025),
+        upper = ~ quantile(.x, 0.975)
+      )
+    )
+  )
+```
+
+## Regional Analysis
+
+```{r}
 fit_weibull_env <- brm(
-  Duration | cens(censored) ~
-    Tech +
-    RFZ,
-  data = df_hol_filt,
+  Duration | cens(censored) ~ Technology + Biome,
+  data = wilton_fit,
   family = weibull(),
   chains = 4,
   iter = 4000,
@@ -166,69 +389,994 @@ fit_weibull_env <- brm(
 summary(fit_weibull_env)
 ```
 
-## Test models
+```{r}
+draws <- as_draws_df(fit_weibull_env)
+
+tech_draws <- draws |>
+  transmute(
+    draw = row_number(),
+    
+    shape = shape,
+    
+    CeramicLSA_azonal = exp(b_Intercept),
+    
+    FinalLSA_azonal = exp(
+      b_Intercept + b_TechnologyFinalLSA
+    ),
+    
+    Oakhurst_azonal = exp(
+      b_Intercept + b_TechnologyOakhurst
+    ),
+    
+    Robberg_azonal = exp(
+      b_Intercept + b_TechnologyRobberg
+    ),
+    
+    Wilton_azonal = exp(
+      b_Intercept + b_TechnologyWilton
+    ),
+    
+    # Fynbos
+    CeramicLSA_fynbos = exp(
+      b_Intercept + b_BiomeFynbosBiome
+        ),
+    
+    FinalLSA_Fynbos = exp(
+      b_Intercept + b_TechnologyFinalLSA + b_BiomeFynbosBiome
+    ),
+    
+    Oakhurst_Fynbos = exp(
+      b_Intercept + b_TechnologyOakhurst+ b_BiomeFynbosBiome
+    ),
+    
+    Robberg_Fynbos = exp(
+      b_Intercept + b_TechnologyRobberg+ b_BiomeFynbosBiome
+    ),
+    
+    Wilton_Fynbos = exp(
+      b_Intercept + b_TechnologyWilton+ b_BiomeFynbosBiome
+    ),
+    # Forest
+    CeramicLSA_Forest = exp(
+      b_Intercept + b_BiomeForests
+    ),
+    
+    FinalLSA_Forest = exp(
+      b_Intercept + b_TechnologyFinalLSA + b_BiomeForests
+    ),
+    
+    Oakhurst_Forest = exp(
+      b_Intercept + b_TechnologyOakhurst+ b_BiomeForests
+    ),
+    
+    Robberg_Forest = exp(
+      b_Intercept + b_TechnologyRobberg+ b_BiomeForests
+    ),
+    
+    Wilton_Forest = exp(
+      b_Intercept + b_TechnologyWilton+ b_BiomeForests
+    ),
+    
+    # Desert
+    CeramicLSA_Desert = exp(
+      b_Intercept + b_BiomeDesertBiome
+    ),
+    
+    FinalLSA_Desert = exp(
+      b_Intercept + b_TechnologyFinalLSA + b_BiomeDesertBiome
+    ),
+    
+    Oakhurst_Desert = exp(
+      b_Intercept + b_TechnologyOakhurst+ b_BiomeDesertBiome
+    ),
+    
+    Robberg_Desert = exp(
+      b_Intercept + b_TechnologyRobberg+ b_BiomeDesertBiome
+    ),
+    
+    Wilton_Desert = exp(
+      b_Intercept + b_TechnologyWilton+ b_BiomeDesertBiome
+    ),
+    
+    # Grassland
+    CeramicLSA_Grassland = exp(
+      b_Intercept + b_BiomeGrasslandBiome
+    ),
+    
+    FinalLSA_Grassland = exp(
+      b_Intercept + b_TechnologyFinalLSA + b_BiomeGrasslandBiome
+    ),
+    
+    Oakhurst_Grassland = exp(
+      b_Intercept + b_TechnologyOakhurst+ b_BiomeGrasslandBiome
+    ),
+    
+    Robberg_Grassland = exp(
+      b_Intercept + b_TechnologyRobberg+ b_BiomeGrasslandBiome
+    ),
+    
+    Wilton_Grassland = exp(
+      b_Intercept + b_TechnologyWilton+ b_BiomeGrasslandBiome
+    ),
+    
+    # IndianOceanCoastalBelt
+    CeramicLSA_IndianOcean = exp(
+      b_Intercept + b_BiomeIndianOceanCoastalBelt
+    ),
+    
+    FinalLSA_IndianOcean = exp(
+      b_Intercept + b_TechnologyFinalLSA + b_BiomeIndianOceanCoastalBelt
+    ),
+    
+    Oakhurst_IndianOcean = exp(
+      b_Intercept + b_TechnologyOakhurst+ b_BiomeIndianOceanCoastalBelt
+    ),
+    
+    Robberg_IndianOcean = exp(
+      b_Intercept + b_TechnologyRobberg+ b_BiomeIndianOceanCoastalBelt
+    ),
+    
+    Wilton_IndianOcean = exp(
+      b_Intercept + b_TechnologyWilton+ b_BiomeIndianOceanCoastalBelt
+    ),
+    
+    # Karoo
+    CeramicLSA_Karoo = exp(
+      b_Intercept + b_BiomeNamaMKarooBiome
+    ),
+    
+    FinalLSA_Karoo = exp(
+      b_Intercept + b_TechnologyFinalLSA + b_BiomeNamaMKarooBiome
+    ),
+    
+    Oakhurst_Karoo = exp(
+      b_Intercept + b_TechnologyOakhurst+ b_BiomeNamaMKarooBiome
+    ),
+    
+    Robberg_Karoo = exp(
+      b_Intercept + b_TechnologyRobberg+ b_BiomeNamaMKarooBiome
+    ),
+    
+    Wilton_Karoo = exp(
+      b_Intercept + b_TechnologyWilton+ b_BiomeNamaMKarooBiome
+    ),
+    
+    # Sevanna
+    CeramicLSA_Sevanna = exp(
+      b_Intercept + b_BiomeSavannaBiome
+    ),
+    
+    FinalLSA_Sevanna = exp(
+      b_Intercept + b_TechnologyFinalLSA + b_BiomeSavannaBiome
+    ),
+    
+    Oakhurst_Sevanna = exp(
+      b_Intercept + b_TechnologyOakhurst+ b_BiomeSavannaBiome
+    ),
+    
+    Robberg_Sevanna = exp(
+      b_Intercept + b_TechnologyRobberg+ b_BiomeSavannaBiome
+    ),
+    
+    Wilton_Sevanna = exp(
+      b_Intercept + b_TechnologyWilton+ b_BiomeSavannaBiome
+    ),
+    
+    # SucculentKaroo
+    CeramicLSA_SucculentKaroo = exp(
+      b_Intercept + b_BiomeSucculentKarooBiome
+    ),
+    
+    FinalLSA_SucculentKaroo = exp(
+      b_Intercept + b_TechnologyFinalLSA + b_BiomeSucculentKarooBiome
+    ),
+    
+    Oakhurst_SucculentKaroo = exp(
+      b_Intercept + b_TechnologyOakhurst+ b_BiomeSucculentKarooBiome
+    ),
+    
+    Robberg_SucculentKaroo = exp(
+      b_Intercept + b_TechnologyRobberg+ b_BiomeSucculentKarooBiome
+    ),
+    
+    Wilton_SucculentKaroo = exp(
+      b_Intercept + b_TechnologyWilton+ b_BiomeSucculentKarooBiome
+    ),
+    
+    # Thicket
+    CeramicLSA_Thicket = exp(
+      b_Intercept + b_BiomeThicketBiome
+    ),
+    
+    FinalLSA_Thicket = exp(
+      b_Intercept + b_TechnologyFinalLSA + b_BiomeThicketBiome
+    ),
+    
+    Oakhurst_Thicket = exp(
+      b_Intercept + b_TechnologyOakhurst+ b_BiomeThicketBiome
+    ),
+    
+    Robberg_Thicket = exp(
+      b_Intercept + b_TechnologyRobberg+ b_BiomeThicketBiome
+    ),
+    
+    Wilton_Thicket = exp(
+      b_Intercept + b_TechnologyWilton+ b_BiomeThicketBiome
+    )
+    
+  ) |>
+  
+  pivot_longer(
+    cols = -c(draw, shape),
+    names_to = c("Technology", "Biome"),
+    names_sep = "_",
+    values_to = "scale"
+  )
+
+duration_draws <- tech_draws |>
+  mutate(
+    median_duration = scale * log(2)^(1 / shape),
+    mean_duration = scale * gamma(1 + 1 / shape)
+  )
+
+
+duration_summary <- duration_draws |>
+  group_by(Technology, Biome) |>
+  summarise(
+    median = median(median_duration),
+    median_lower = quantile(median_duration, 0.025),
+    median_upper = quantile(median_duration, 0.975),
+    
+    mean = mean(mean_duration),
+    mean_lower = quantile(mean_duration, 0.025),
+    mean_upper = quantile(mean_duration, 0.975),
+    
+    .groups = "drop"
+  )
+
+duration_summary |>
+  mutate(
+    median_duration = round(median, 0),
+    median_CrI = paste0(
+      round(median_lower, 0),
+      "–",
+      round(median_upper, 0)
+    ),
+    mean_duration = round(mean, 0),
+    mean_CrI = paste0(
+      round(mean_lower, 0),
+      "–",
+      round(mean_upper, 0)
+    )
+  ) |>
+  select(
+    Technology,
+    Biome,
+    median_duration,
+    median_CrI,
+    mean_duration,
+    mean_CrI
+  )
+```
 
 ```{r}
-fit_exponential <- brm(
-  Duration | cens(censored) ~
-    Tech +
-    RFZ,
-  data = df_hol_filt,
-  family = exponential(),
+# alternative
+prediction_grid <- expand_grid(
+  Technology = unique(wilton_fit$Technology),
+  Biome = unique(wilton_fit$Biome)
+)
+
+eta_draws <- posterior_linpred(
+  fit_weibull_env,
+  newdata = prediction_grid,
+  transform = FALSE
+)
+
+scale_draws <- exp(eta_draws) |>
+  as_tibble()
+
+names(scale_draws) <- paste(
+  prediction_grid$Technology,
+  prediction_grid$Biome,
+  sep = "_"
+)
+
+scale_draws <- scale_draws |>
+  mutate(draw = row_number()) |>
+  pivot_longer(
+    cols = -draw,
+    names_to = c("Technology", "Biome"),
+    names_sep = "_",
+    values_to = "scale"
+  )
+
+shape_draws <- draws |>
+  transmute(
+    draw = row_number(),
+    shape = shape
+  )
+
+tech_biome_draws <- scale_draws |>
+  left_join(shape_draws, by = "draw")
+
+duration_draws <- tech_biome_draws |>
+  mutate(
+    median_duration =
+      scale * log(2)^(1 / shape),
+    
+    mean_duration =
+      scale * gamma(1 + 1 / shape)
+  )
+
+duration_summary <- duration_draws |>
+  group_by(Technology, Biome) |>
+  summarise(
+    median = median(median_duration),
+    median_lower = quantile(median_duration, 0.025),
+    median_upper = quantile(median_duration, 0.975),
+    
+    mean = mean(mean_duration),
+    mean_lower = quantile(mean_duration, 0.025),
+    mean_upper = quantile(mean_duration, 0.975),
+    
+    .groups = "drop"
+  )
+```
+
+```{r}
+duration_grid <- seq(
+  0,
+  quantile(wilton_fit$Duration, 0.99, na.rm = TRUE),
+  length.out = 300
+)
+
+survival_draws <- tech_biome_draws |>
+  tidyr::crossing(
+    Duration = duration_grid
+  ) |>
+  mutate(
+    survival = exp(
+      -(Duration / scale)^shape
+    )
+  )
+
+survival_summary <- survival_draws |>
+  group_by(Technology, Biome, Duration) |>
+  summarise(
+    estimate = median(survival),
+    lower = quantile(survival, 0.025),
+    upper = quantile(survival, 0.975),
+    .groups = "drop"
+  )
+
+ggplot(
+  survival_summary,
+  aes(
+    x = Duration,
+    y = estimate,
+    color = Technology,
+    fill = Technology
+  )
+) +
+  geom_ribbon(
+    aes(ymin = lower, ymax = upper),
+    alpha = 0.15,
+    color = NA
+  ) +
+  geom_line(
+    linewidth = 1
+  ) +
+  geom_hline(
+    yintercept = 0.5,
+    linetype = "dashed"
+  ) +
+  facet_wrap(~ Biome) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  labs(
+    x = "Duration",
+    y = "Probability of remaining in technological phase",
+    color = "Technology",
+    fill = "Technology"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+```
+
+### Tech x Biome interaction
+
+```{r}
+biome_fit <- wilton_fit |>
+  filter(!is.na(Biome)) |>
+  mutate(Biome = as.character(Biome),
+         Biome = ifelse(Biome %in% c('Nama-Karoo Biome', 'Sevanna Biome'),
+                               'Interior', Biome),
+         Biome = ifelse(Biome %in% c('Succulent Karoo Biome', 'Fynbos Biome',
+                                     'Thicket Biome', 'Forests', 
+                                     'Azonal Vegetation'),
+                        'Coastal', Biome),
+         Biome = factor(ifelse(Biome == 'Indian Ocean Coastal Belt',
+                               'Grassland Biome', Biome)),
+         Biome = droplevels(Biome))
+
+my_prior <-
+  prior(normal(0, 1), class = 'Intercept') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'BiomeSavannaBiome') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA:BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA:BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA:BiomeInterior') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA:BiomeSavannaBiome') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst:BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst:BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst:BiomeInterior') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst:BiomeSavannaBiome') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeInterior') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeSavannaBiome') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton:BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton:BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton:BiomeInterior') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton:BiomeSavannaBiome') +
+  
+  prior(cauchy(0, 5), class = 'shape')
+
+fit_weibull_env2 <- brm(
+  Duration | cens(censored) ~ Technology * Biome,
+  data = biome_fit,
+  family = weibull(),
   chains = 4,
   iter = 4000,
   seed = 123456,
+  prior = my_prior,
   cores = parallel::detectCores()
 )
 
-summary(fit_exponential)
 ```
 
 ```{r}
-loo_compare(
-  loo(fit_weibull_env),
-   loo(fit_exponential)
-)
-```
-
-```{r}
-with(
-    df_hol_filt,
-    table(Tech, RFZ)
+prediction_grid <- expand_grid(
+  Technology = unique(biome_fit$Technology),
+  Biome = unique(biome_fit$Biome)
 )
 
-#Low observations may make the model fit poorly
-```
-
-```{r}
-hypothesis(fit_weibull_tech, 'shape > 1', class = "")
-```
-
-```{r}
-draws <- as_draws_df(fit_weibull_tech)
-
-industry_effect <- exp(draws$b_TechEarlyIronAge)
-
-mean(industry_effect)
-quantile(
-  industry_effect,
-  c(0.025, 0.5, 0.975)
+eta_draws <- posterior_linpred(
+  fit_weibull_env2,
+  newdata = prediction_grid,
+  transform = FALSE
 )
+
+scale_draws <- exp(eta_draws) |>
+  as_tibble()
+
+names(scale_draws) <- paste(
+  prediction_grid$Technology,
+  prediction_grid$Biome,
+  sep = "_"
+)
+
+scale_draws <- scale_draws |>
+  mutate(draw = row_number()) |>
+  pivot_longer(
+    cols = -draw,
+    names_to = c("Technology", "Biome"),
+    names_sep = "_",
+    values_to = "scale"
+  )
+
+shape_draws <- draws |>
+  transmute(
+    draw = row_number(),
+    shape = shape
+  )
+
+tech_biome_draws <- scale_draws |>
+  left_join(shape_draws, by = "draw")
+
+duration_draws <- tech_biome_draws |>
+  mutate(
+    median_duration =
+      scale * log(2)^(1 / shape),
+    
+    mean_duration =
+      scale * gamma(1 + 1 / shape)
+  )
+
+duration_summary <- duration_draws |>
+  group_by(Technology, Biome) |>
+  summarise(
+    median = median(median_duration),
+    median_lower = quantile(median_duration, 0.025),
+    median_upper = quantile(median_duration, 0.975),
+    
+    mean = mean(mean_duration),
+    mean_lower = quantile(mean_duration, 0.025),
+    mean_upper = quantile(mean_duration, 0.975),
+    
+    .groups = "drop"
+  )
+```
+
+```{r}
+duration_grid <- seq(
+  0,
+  quantile(biome_fit$Duration, 0.99, na.rm = TRUE),
+  length.out = 300
+)
+
+duration_grid <- seq(
+  0,
+  max(biome_fit$Duration, na.rm = TRUE),
+  length.out = 300
+)
+
+survival_draws <- tech_biome_draws |>
+  tidyr::crossing(
+    Duration = duration_grid
+  ) |>
+  mutate(
+    survival = exp(
+      -(Duration / scale)^shape
+    )
+  )
+
+survival_summary <- survival_draws |>
+  group_by(Technology, Biome, Duration) |>
+  summarise(
+    estimate = median(survival),
+    lower = quantile(survival, 0.025),
+    upper = quantile(survival, 0.975),
+    .groups = "drop"
+  )
+
+ggplot(
+  survival_summary,
+  aes(
+    x = Duration,
+    y = estimate,
+    color = Technology,
+    fill = Technology
+  )
+) +
+  geom_ribbon(
+    aes(ymin = lower, ymax = upper),
+    alpha = 0.15,
+    color = NA
+  ) +
+  geom_line(
+    linewidth = 1
+  ) +
+  geom_hline(
+    yintercept = 0.5,
+    linetype = "dashed"
+  ) +
+  facet_wrap(~ Biome) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  labs(
+    x = "Duration",
+    y = "Probability of remaining in technological phase",
+    color = "Technology",
+    fill = "Technology"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
 ```
 
 ## Model shape paramter as random
 
 ```{r}
+
+my_prior <-
+  prior(normal(0, 1), class = 'Intercept') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton') +
+  
+  prior(cauchy(0, 5), class = 'b', dpar = 'shape')
+  
 fit_shape_tech <- brm(
-  bf(Duration | cens(censored) ~ Tech,
-     shape ~ Tech),
-  data = df_hol_filt,
+  bf(Duration | cens(censored) ~ Technology,
+     shape ~ Technology),
+  data = wilton_fit,
   family = weibull(),
   chains = 4,
   iter = 4000,
+  prior = my_prior,
   cores = parallel::detectCores(),
-  seed = 777
+  seed = 77766
 )
 
+
+
+
+
+my_prior <-
+  prior(normal(0, 1), class = 'Intercept') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'BiomeSavannaBiome') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA:BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA:BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA:BiomeInterior') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA:BiomeSavannaBiome') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst:BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst:BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst:BiomeInterior') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst:BiomeSavannaBiome') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeInterior') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeSavannaBiome') +
+  
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton:BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton:BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton:BiomeInterior') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton:BiomeSavannaBiome') +
+  
+  prior(cauchy(0, 5), class = 'b', dpar = 'shape')
+
+
+fit_shape_tech_biome <- brm(
+  bf(Duration | cens(censored) ~ Technology * Biome,
+     shape ~ Technology),
+  data = biome_fit,
+  family = weibull(),
+  chains = 4,
+  iter = 4000,
+  prior = my_prior,
+  cores = parallel::detectCores(),
+  seed = 777666
+)
+
+
+
 summary(fit_shape_tech)
+summary(fit_shape_tech_biome)
+```
+
+```{r}
+
+draws <- as_draws_df(fit_shape_tech)
+
+prediction_grid <- expand_grid(
+  Technology = unique(wilton_fit$Technology)
+)
+
+eta_draws <- posterior_linpred(
+  fit_shape_tech,
+  newdata = prediction_grid,
+  transform = FALSE
+)
+
+scale_draws <- exp(eta_draws) |>
+  as_tibble()
+
+names(scale_draws) <- paste(
+  prediction_grid$Technology
+)
+
+scale_draws <- scale_draws |>
+  mutate(draw = row_number()) |>
+  pivot_longer(
+    cols = -draw,
+    names_to = c("Technology"),
+    values_to = "scale"
+  )
+
+shape_draws <- draws |>
+  transmute(
+    draw = row_number(),
+    shape = b_shape_Intercept
+  )
+
+tech_biome_draws <- scale_draws |>
+  left_join(shape_draws, by = "draw")
+
+duration_draws <- tech_biome_draws |>
+  mutate(
+    median_duration =
+      scale * log(2)^(1 / shape),
+    
+    mean_duration =
+      scale * gamma(1 + 1 / shape)
+  )
+
+duration_summary <- duration_draws |>
+  group_by(Technology) |>
+  summarise(
+    median = median(median_duration),
+    median_lower = quantile(median_duration, 0.025),
+    median_upper = quantile(median_duration, 0.975),
+    
+    mean = mean(mean_duration),
+    mean_lower = quantile(mean_duration, 0.025),
+    mean_upper = quantile(mean_duration, 0.975),
+    
+    .groups = "drop"
+  )
+
+
+duration_draws |>
+  
+  select(Technology, median_duration) |>
+  group_by(Technology) |> 
+  mutate(id = row_number()) |> 
+  ungroup() |>
+  
+  pivot_wider(names_from = Technology, values_from = median_duration) |>
+  
+  summarize('P(Robberg > Oakhurst)' =
+              mean(Robberg > Oakhurst),
+            'P(Oakhurst > Wilton)' =
+              mean(Oakhurst > Wilton),
+            'P(Wilton > Final LSA)' =
+              mean(Wilton > `Final LSA`),
+            
+            'P(Robberg > Wilton)' =
+              mean(Robberg > Wilton),
+            'P(Oakhurst > Final LSA)' =
+              mean(Oakhurst > `Final LSA`)
+  )
+```
+
+```{r}
+
+duration_grid <- seq(
+  0,
+  max(wilton_df$Duration, na.rm = TRUE),
+  length.out = 300
+)
+
+survival_draws <- tech_biome_draws |>
+  tidyr::crossing(
+    Duration = duration_grid
+  ) |>
+  mutate(
+    survival = exp(
+      -(Duration / scale)^shape
+    )
+  )
+
+survival_summary <- survival_draws |>
+  group_by(Technology, Duration) |>
+  summarise(
+    estimate = median(survival),
+    lower = quantile(survival, 0.025),
+    upper = quantile(survival, 0.975),
+    .groups = "drop"
+  )
+
+ggplot(
+  survival_summary,
+  aes(
+    x = Duration,
+    y = estimate,
+    color = Technology,
+    fill = Technology
+  )
+) +
+  geom_ribbon(
+    aes(ymin = lower, ymax = upper),
+    alpha = 0.15,
+    color = NA
+  ) +
+  geom_line(
+    linewidth = 1
+  ) +
+  geom_hline(
+    yintercept = 0.5,
+    linetype = "dashed"
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  labs(
+    x = "Duration",
+    y = "Probability of remaining in technological phase",
+    color = "Technology",
+    fill = "Technology"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+```
+
+```{r}
+draws <- as_draws_df(fit_shape_tech_biome)
+
+prediction_grid <- expand_grid(
+  Technology = unique(biome_fit$Technology),
+  Biome = unique(biome_fit$Biome)
+)
+
+eta_draws <- posterior_linpred(
+  fit_shape_tech_biome,
+  newdata = prediction_grid,
+  transform = FALSE
+)
+
+scale_draws <- exp(eta_draws) |>
+  as_tibble()
+
+names(scale_draws) <- paste(
+  prediction_grid$Technology,
+  prediction_grid$Biome,
+  sep = "_"
+)
+
+scale_draws <- scale_draws |>
+  mutate(draw = row_number()) |>
+  pivot_longer(
+    cols = -draw,
+    names_to = c("Technology", "Biome"),
+    names_sep = "_",
+    values_to = "scale"
+  )
+
+shape_draws <- draws |>
+  transmute(
+    draw = row_number(),
+    shape = b_shape_Intercept
+  )
+
+tech_biome_draws <- scale_draws |>
+  left_join(shape_draws, by = "draw")
+
+duration_draws <- tech_biome_draws |>
+  mutate(
+    median_duration =
+      scale * log(2)^(1 / shape),
+    
+    mean_duration =
+      scale * gamma(1 + 1 / shape)
+  )
+
+duration_summary <- duration_draws |>
+  group_by(Technology, Biome) |>
+  summarise(
+    median = median(median_duration),
+    median_lower = quantile(median_duration, 0.025),
+    median_upper = quantile(median_duration, 0.975),
+    
+    mean = mean(mean_duration),
+    mean_lower = quantile(mean_duration, 0.025),
+    mean_upper = quantile(mean_duration, 0.975),
+    
+    .groups = "drop"
+  )
+
+duration_draws |>
+  
+  select(Technology, Biome, median_duration) |>
+  group_by(Technology, Biome) |> 
+  mutate(id = row_number()) |> 
+  ungroup() |>
+  
+  pivot_wider(names_from = c(Technology, Biome), values_from = median_duration) |>
+  
+  summarize('P(Wilton_Interior > Wilton_Coastal)' =
+              mean(Wilton_Interior > Wilton_Coastal),
+            'P(Oakhurst_Interior > Oakhurst_Coastal)' =
+              mean(Oakhurst_Interior > Oakhurst_Coastal),
+            'P(Robberg_Interior > Robberg_Coastal)' =
+              mean(Robberg_Interior > Robberg_Coastal),
+            
+            'P(Robberg_Interior > Oakhurst_Interior)' =
+              mean(Robberg_Interior > Oakhurst_Interior),
+            'P(Oakhurst_Interior > Wilton_Interior)' =
+              mean(Oakhurst_Interior > Wilton_Interior),
+            'P(Wilton_Interior > Final LSA_Interior)' =
+              mean(Wilton_Interior > `Final LSA_Interior`),
+            
+            'P(Robberg_Coastal > Oakhurst_Coastal)' =
+              mean(Robberg_Coastal > Oakhurst_Coastal),
+            'P(Oakhurst_Coastal > Wilton_Coastal)' =
+              mean(Oakhurst_Coastal > Wilton_Coastal),
+            'P(Wilton_Coastal > Final LSA_Coastal)' =
+              mean(Wilton_Coastal > `Final LSA_Coastal`)
+            )
+```
+
+```{r}
+duration_grid <- seq(
+  0,
+  quantile(biome_fit$Duration, 0.99, na.rm = TRUE),
+  length.out = 300
+)
+
+duration_grid <- seq(
+  0,
+  max(biome_fit$Duration, na.rm = TRUE),
+  length.out = 300
+)
+
+survival_draws <- tech_biome_draws |>
+  tidyr::crossing(
+    Duration = duration_grid
+  ) |>
+  mutate(
+    survival = exp(
+      -(Duration / scale)^shape
+    )
+  )
+
+survival_summary <- survival_draws |>
+  group_by(Technology, Biome, Duration) |>
+  summarise(
+    estimate = median(survival),
+    lower = quantile(survival, 0.025),
+    upper = quantile(survival, 0.975),
+    .groups = "drop"
+  )
+
+ggplot(
+  survival_summary,
+  aes(
+    x = Duration,
+    y = estimate,
+    color = Technology,
+    fill = Technology
+  )
+) +
+  geom_ribbon(
+    aes(ymin = lower, ymax = upper),
+    alpha = 0.15,
+    color = NA
+  ) +
+  geom_line(
+    linewidth = 1
+  ) +
+  geom_hline(
+    yintercept = 0.5,
+    linetype = "dashed"
+  ) +
+  facet_wrap(~ Biome) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::percent
+  ) +
+  labs(
+    x = "Duration",
+    y = "Probability of remaining in technological phase",
+    color = "Technology",
+    fill = "Technology"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
 ```
