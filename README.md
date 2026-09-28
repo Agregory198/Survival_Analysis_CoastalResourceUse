@@ -4,7 +4,11 @@ This project employs survival curves and Bayesian models to quantify the most po
 ## Hypothesis
 $H_1$: The length and duration of hunter-gatherer technology is a function of population size.
 <br>
-$A$: Robberg technology lasts from 19,923-13,145 years ago
-$B$: Oakhurst technology lasts from 12,789-8,705 years ago
-$C$: Wilton technology lasts from 7,784-4,636 years ago
-$D$: Final Later Stone age technology lasts from 2,898-1,318 years ago
+$H_{1A}$: Robberg technology lasts from 19,923-13,145 years ago
+<br>
+$H_{1B}$: Oakhurst technology lasts from 12,789-8,705 years ago
+<br>
+$H_{1C}$: Wilton technology lasts from 7,784-4,636 years ago
+<br>
+$H_{1D}$: Final Later Stone age technology lasts from 2,898-1,318 years ago
+<br>
