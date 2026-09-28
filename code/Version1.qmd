@@ -8,6 +8,9 @@ editor: visual
 #| warning: false
 #| message: false
 
+#options(download.file.method = "wininet")
+
+
 library(here)
 library(ggplot2)
 library(tidyr)
@@ -1150,6 +1153,221 @@ duration_draws |>
               mean(Oakhurst > `Final LSA`)
   )
 ```
+
+```{r}
+draws <- as_draws_df(fit_shape_tech_biome)
+
+prediction_grid <- expand_grid(
+  Technology = unique(biome_fit$Technology),
+  Biome = unique(biome_fit$Biome)
+)
+
+eta_draws <- posterior_linpred(
+  fit_shape_tech_biome,
+  newdata = prediction_grid,
+  transform = FALSE
+)
+
+scale_draws <- exp(eta_draws) |>
+  as_tibble()
+
+names(scale_draws) <- paste(
+  prediction_grid$Technology,
+  prediction_grid$Biome
+)
+
+scale_draws <- scale_draws |>
+  mutate(draw = row_number()) |>
+  pivot_longer(
+    cols = -draw,
+    names_to = c("Technology-Biome"),
+    values_to = "scale"
+  )
+
+shape_draws <- draws |>
+  transmute(
+    draw = row_number(),
+    shape = b_shape_Intercept
+  )
+
+tech_biome_draws <- scale_draws |>
+  left_join(shape_draws, by = "draw")
+
+duration_draws <- tech_biome_draws |>
+  mutate(
+    median_duration =
+      scale * log(2)^(1 / shape),
+    
+    mean_duration =
+      scale * gamma(1 + 1 / shape)
+  )
+
+duration_summary <- duration_draws |>
+  group_by(`Technology-Biome`) |>
+  summarise(
+    median = median(median_duration),
+    median_lower = quantile(median_duration, 0.025),
+    median_upper = quantile(median_duration, 0.975),
+    
+    mean = mean(mean_duration),
+    mean_lower = quantile(mean_duration, 0.025),
+    mean_upper = quantile(mean_duration, 0.975),
+    
+    .groups = "drop"
+  )
+
+
+duration_draws |>
+  
+  select(`Technology-Biome`, mean_duration) |>
+  group_by(`Technology-Biome`) |> 
+  mutate(id = row_number()) |> 
+  ungroup() |>
+  
+  pivot_wider(names_from = `Technology-Biome`,
+              values_from = mean_duration) |>
+  
+  summarize(
+    # Robberg
+    'P(Sevanna > Interior)' =
+              mean(`Robberg Savanna Biome` > `Robberg Interior`),
+            
+    'P(Grassland > Interior)' =
+              mean(`Robberg Grassland Biome` > `Robberg Interior`),
+            
+    'P(Desert > Interior)' =
+              mean(`Robberg Desert Biome` > `Robberg Interior`),
+            
+    'P(Coastal > Interior)' =
+              mean(`Robberg Coastal` > `Robberg Interior`),
+    
+     'P(Sevanna > Coastal)' =
+              mean(`Robberg Savanna Biome` > `Robberg Coastal`),
+    
+    'P(Grassland > Coastal)' =
+      mean(`Robberg Grassland Biome` > `Robberg Coastal`),
+    
+    'P(Desert > Coastal)' =
+      mean(`Robberg Desert Biome` > `Robberg Coastal`),
+    
+    'P(Sevanna > Grassland)' =
+      mean(`Robberg Savanna Biome` > `Robberg Grassland Biome`),
+    
+    'P(Desert > Grassland)' =
+      mean(`Robberg Desert Biome` > `Robberg Grassland Biome`),
+    
+    'P(Sevanna > Desert)' =
+      mean(`Robberg Savanna Biome` > `Robberg Desert Biome`),
+    
+    # Oakhurst
+    'P(Sevanna > Interior)_oak' =
+      mean(`Oakhurst Savanna Biome` > `Oakhurst Interior`),
+    
+    'P(Grassland > Interior)_oak' =
+      mean(`Oakhurst Grassland Biome` > `Oakhurst Interior`),
+    
+    'P(Desert > Interior)_oak' =
+      mean(`Oakhurst Desert Biome` > `Oakhurst Interior`),
+    
+    'P(Coastal > Interior)_oak' =
+      mean(`Oakhurst Coastal` > `Oakhurst Interior`),
+    
+    'P(Sevanna > Coastal)_oak' =
+      mean(`Oakhurst Savanna Biome` > `Oakhurst Coastal`),
+    
+    'P(Grassland > Coastal)_oak' =
+      mean(`Oakhurst Grassland Biome` > `Oakhurst Coastal`),
+    
+    'P(Desert > Coastal)_oak' =
+      mean(`Oakhurst Desert Biome` > `Oakhurst Coastal`),
+    
+    'P(Sevanna > Grassland)_oak' =
+      mean(`Oakhurst Savanna Biome` > `Oakhurst Grassland Biome`),
+    
+    'P(Desert > Grassland)_oak' =
+      mean(`Oakhurst Desert Biome` > `Oakhurst Grassland Biome`),
+    
+    'P(Sevanna > Desert)_oak' =
+      mean(`Oakhurst Savanna Biome` > `Oakhurst Desert Biome`),
+    
+    # Wilton
+    'P(Sevanna > Interior)_wil' =
+      mean(`Wilton Savanna Biome` > `Wilton Interior`),
+    
+    'P(Grassland > Interior)_wil' =
+      mean(`Wilton Grassland Biome` > `Wilton Interior`),
+    
+    'P(Desert > Interior)_wil' =
+      mean(`Wilton Desert Biome` > `Wilton Interior`),
+    
+    'P(Coastal > Interior)_wil' =
+      mean(`Wilton Coastal` > `Wilton Interior`),
+    
+    'P(Sevanna > Coastal)_wil' =
+      mean(`Wilton Savanna Biome` > `Wilton Coastal`),
+    
+    'P(Grassland > Coastal)_wil' =
+      mean(`Wilton Grassland Biome` > `Wilton Coastal`),
+    
+    'P(Desert > Coastal)_wil' =
+      mean(`Wilton Desert Biome` > `Wilton Coastal`),
+    
+    'P(Sevanna > Grassland)_wil' =
+      mean(`Wilton Savanna Biome` > `Wilton Grassland Biome`),
+    
+    'P(Desert > Grassland)_wil' =
+      mean(`Wilton Desert Biome` > `Wilton Grassland Biome`),
+    
+    'P(Sevanna > Desert)_wil' =
+      mean(`Wilton Savanna Biome` > `Wilton Desert Biome`),
+    
+    # Final LSA
+    'P(Sevanna > Interior)_fin' =
+      mean(`Final LSA Savanna Biome` > `Final LSA Interior`),
+    
+    'P(Grassland > Interior)_fin' =
+      mean(`Final LSA Grassland Biome` > `Final LSA Interior`),
+    
+    'P(Desert > Interior)_fin' =
+      mean(`Final LSA Desert Biome` > `Final LSA Interior`),
+    
+    'P(Coastal > Interior)_fin' =
+      mean(`Final LSA Coastal` > `Final LSA Interior`),
+    
+    'P(Sevanna > Coastal)_fin' =
+      mean(`Final LSA Savanna Biome` > `Final LSA Coastal`),
+    
+    'P(Grassland > Coastal)_fin' =
+      mean(`Final LSA Grassland Biome` > `Final LSA Coastal`),
+    
+    'P(Desert > Coastal)_fin' =
+      mean(`Final LSA Desert Biome` > `Final LSA Coastal`),
+    
+    'P(Sevanna > Grassland)_fin' =
+      mean(`Final LSA Savanna Biome` > `Final LSA Grassland Biome`),
+    
+    'P(Desert > Grassland)_fin' =
+      mean(`Final LSA Desert Biome` > `Final LSA Grassland Biome`),
+    
+    'P(Sevanna > Desert)_fin' =
+      mean(`Final LSA Savanna Biome` > `Final LSA Desert Biome`)
+    
+    ) |>
+  pivot_longer('P(Sevanna > Interior)':'P(Sevanna > Desert)_fin',
+               names_to = 'Comparison',
+               values_to = 'Probability') |>
+  mutate(Technology = 
+           c(
+             rep('Robberg', 10),
+             rep('Oakhurst', 10),
+             rep('Wilton', 10),
+             rep('Final LSA', 10)
+         )
+         
+         )
+```
+
+# Junks
 
 ```{r}
 
