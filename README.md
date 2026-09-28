@@ -2,7 +2,7 @@
 ## Objective
 This project employs survival curves and Bayesian models to quantify the most porbable length of time that southern African hunter-gatherers used specific technologies.
 ## Hypothesis
-$H_1$: The length and duration of hunter-gatherer technology is a function of population size.
+#### $H_1$: The length and duration of hunter-gatherer technology is a function of population size.
 <br>
 $H_{1A}$: Robberg technology lasts from 19,923-13,145 years ago
 <br>
