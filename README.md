@@ -25,3 +25,5 @@ $H_{2D}$: Final Later Stone age technology has the same duration across all sout
 <br>
 
 # Methods
+This project tests the presumed relationship between prehistoric technologies, geographic range, and demographics in southern Africa over the past 20,000 years. I use the largest collection of soutern Africa's radiocarbon database to determine the ages in which certain sites contained one technology over another and during which calendar period. I then model these via a Weibull distribution via Bayesian techniques to generate posterior probabilities for how long each technology was used. I use two Bayesian models to evaluate 1) the overall length of each technology across southern Africa, and 2) the length of each technology conditioned on southern African geographic range. In both cases, I allow the shape parameter to vary randomly via technological classifications, assuming different rates of change between prehistoric technologies. 
+## Database
