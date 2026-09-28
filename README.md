@@ -13,7 +13,7 @@ $H_{1C}$: Wilton technology lasts from 7,784-4,636 years ago
 $H_{1D}$: Final Later Stone age technology lasts from 2,898-1,318 years ago
 <br>
 
-#### $H_2$: The length and duration of hunter-gatherer technology is a function of geographic location and range
+### $H_2$: The length and duration of hunter-gatherer technology is a function of geographic location and range
 
 $H_{2A}$ Robberg technology has the same duration across all southern African regions
 <br>
@@ -23,3 +23,5 @@ $H_{2C}$: Wilton technology has a shortened or absent duration in the southern A
 <br>
 $H_{2D}$: Final Later Stone age technology has the same duration across all southern African regions
 <br>
+
+# Methods
