@@ -22,6 +22,14 @@ library(c14bazAAR)
 
 library(survival)
 library(survminer)
+
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(terra)
+library(sf)
+
+library(gtsummary)
+library(gt)
 ```
 
 ```{r}
@@ -40,6 +48,8 @@ za <- read_csv(paste0(dir,"/data/SARD_Mar2021_14C.csv")) |>
   filter(Species != "Homo sapiens" | is.na(Species),
          c14age > 500, c14age < 30000)
 ```
+
+# Carbon Calibration
 
 ```{r}
 # filter by terrestrial material and apply the terrestrial calibration curve
@@ -93,15 +103,123 @@ za_prob <- purrr::map2_dfr(
   )
 ```
 
-```{r}
+# Southern African Mapping
 
+```{r}
 df_sub_int <- za_prob |>
   group_by(Site, DateID, Technology, Biome) |>
   summarize(upr = quantile(calBP, 0.975),
             lwr = quantile(calBP, 0.025)) |>
-  filter(!is.na(Technology))
+  mutate(Technology = ifelse(Technology %in% c('Early Iron Age',
+                                               'Later Iron Age'),
+                             'Ceramic LSA', Technology),
+         Technology = factor(Technology, levels = c('Robberg', 'Oakhurst',
+                                                    'Wilton', 'Final LSA',
+                                                    'Ceramic LSA')),
+         Technology = droplevels(Technology)) %>%  
+  filter(!is.na(Technology), Technology %in% c('Robberg', 'Oakhurst',
+                                               'Wilton', 'Final LSA',
+                                               'Ceramic LSA'))
+
+df_map <- df_sub_int |>
+  left_join(za) |>
+  select(Site, DateID, Biome, DecdegS, DecdegE, Technology, RFZ,
+         c14age, c14std, upr, lwr, material, 'Site Type') |>
+  filter(!is.na(DecdegE))
+
+sites_sf <- st_as_sf(
+  df_map,
+  coords = c('DecdegE', 'DecdegS'),
+  crs = 4326
+)
+
+sites_proj <- st_transform(
+  sites_sf,
+  32734
+)
+
+za_map <- sites_proj %>%
+  ungroup() %>%
+  mutate(x = st_coordinates(sites_proj)[,1],
+         y = st_coordinates(sites_proj)[,2]) %>%
+  filter(!is.na(Biome))
+
+coords <- st_coordinates(sites_proj)
+
+za_coords <- df_map %>%
+  ungroup() %>%
+  mutate(
+    x = coords[,1],
+    y = coords[,2]
+  )
+
+africa_map <- ne_countries(
+  scale = 'medium',
+  continent = 'Africa',
+  returnclass = 'sf'
+)
+```
+
+```{r}
+za_map <- za_map %>%
+  mutate(Biome = as.character(Biome),
+         Biome = ifelse(Biome %in% c('Nama-Karoo Biome', 'Sevanna Biome'),
+                        'Interior', Biome),
+         Biome = ifelse(Biome %in% c('Succulent Karoo Biome', 'Fynbos Biome',
+                                     'Thicket Biome', 'Forests', 
+                                     'Azonal Vegetation'),
+                        'Coastal', Biome),
+         Biome = factor(ifelse(Biome == 'Indian Ocean Coastal Belt',
+                               'Grassland Biome', Biome)),
+         Biome = droplevels(Biome),
+         
+         Technology = factor(Technology, levels = c('Robberg', 'Oakhurst',
+                                                    'Wilton', 'Final LSA',
+                                                    'Ceramic LSA')),
+         Technology = droplevels(Technology))
 
 
+png(paste0(dir, '/results/figures/Fig1.png'),
+    width = 2800, height = 1200, res = 300)
+
+ggplot() +
+  geom_sf(data = africa_map, fill = 'antiquewhite', color = 'darkgrey') +
+  geom_sf(data = za_map, aes(color = Biome)) +
+  facet_wrap(~Technology) +
+  coord_sf(xlim = c(10, 42), ylim = c(-35, -15), expand = FALSE) +
+  theme_minimal()
+
+dev.off()
+
+# Produce a summary table
+table_1 <- za_map %>%
+  st_drop_geometry() %>%
+  rename(`Oldest Date` = upr,
+         `Youngest Date` = lwr) %>%
+  mutate(Biome = str_replace(Biome, 'Biome', "")) %>%
+  select(Biome, Technology, `Oldest Date`, `Youngest Date`) %>%
+  
+  tbl_summary(
+    by = Technology,
+    statistic = list(all_categorical() ~ "{n} ({p}%)",
+                     all_continuous() ~ "{mean} ({sd})"),
+    missing_text = "(Missing)"
+  ) %>%
+  
+  modify_spanning_header(
+    all_stat_cols() ~ "**Technology**"
+    ) %>%
+  
+  bold_labels() %>%
+  
+  modify_caption("**Table 1: Frequency of technological toolkits by biome and containing the mean and standard deviation the oldest and youngest recorded dates (calibrated years before present)**")
+
+# Save table to directory
+gt::gtsave(
+  data = as_gt(table_1),
+  filename = 'Table1.png',
+  path = paste0(dir, '/results/tables')
+)
 ```
 
 ```{r}
@@ -122,8 +240,13 @@ df_sub_order <- df_sub_int |>
          Technology = if_else(
            str_detect(Technology, 'Iron'),
            'Ceramic LSA',
-           Technology
-           ))
+           Technology),
+           
+           Technology = factor(Technology, levels = c('Robberg', 'Oakhurst',
+                                                      'Wilton', 'Final LSA',
+                                                      'Ceramic LSA')),
+           Technology = droplevels(Technology)
+           )
 
 
 period <- tibble(
@@ -989,13 +1112,48 @@ ggplot(
 ## Model shape paramter as random
 
 ```{r}
+# organize the data for the first model
+tech_fit <- df_sub_order |>
+  filter(!(Technology %in% c('ELSA/transitional', 'ELSA', 'Final MSA'))) |>
+  mutate(
+    entry = pmax(0, period_start - max_upr),
+    exit_raw = period_start - min_lwr,
+    exit = pmax(0, pmin(exit_raw, period_duration)),
+    event = if_else(exit_raw > 0 & exit_raw < period_duration, 1L, 0L),
+    
+    Technology = factor(Technology),
+    Technology = droplevels(Technology),
+    
+    Biome = factor(Biome),
+    Biome = droplevels(Biome)
+  ) |>
+  mutate(
+    censored = if_else(event == 1, "none", "right")
+  )
+
+# organize the data for the second model with biomes
+biome_fit <- tech_fit |>
+  filter(!is.na(Biome)) |>
+  mutate(Biome = as.character(Biome),
+         Biome = ifelse(Biome %in% c('Nama-Karoo Biome', 'Sevanna Biome'),
+                        'Interior', Biome),
+         Biome = ifelse(Biome %in% c('Succulent Karoo Biome', 'Fynbos Biome',
+                                     'Thicket Biome', 'Forests', 
+                                     'Azonal Vegetation'),
+                        'Coastal', Biome),
+         Biome = factor(ifelse(Biome == 'Indian Ocean Coastal Belt',
+                               'Grassland Biome', Biome)),
+         Biome = droplevels(Biome))
+```
+
+```{r}
 
 my_prior <-
   prior(normal(0, 1), class = 'Intercept') +
   
   prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA') +
   prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst') +
-  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyCeramicLSA') +
   prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton') +
   
   prior(cauchy(0, 5), class = 'b', dpar = 'shape')
@@ -1003,7 +1161,7 @@ my_prior <-
 fit_shape_tech <- brm(
   bf(Duration | cens(censored) ~ Technology,
      shape ~ Technology),
-  data = wilton_fit,
+  data = tech_fit,
   family = weibull(),
   chains = 4,
   iter = 4000,
@@ -1025,7 +1183,7 @@ my_prior <-
   
   prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA') +
   prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst') +
-  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyCeramicLSA') +
   prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton') +
   
   prior(normal(0, 1), class = 'b', coef = 'TechnologyFinalLSA:BiomeDesertBiome') +
@@ -1038,10 +1196,10 @@ my_prior <-
   prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst:BiomeInterior') +
   prior(normal(0, 1), class = 'b', coef = 'TechnologyOakhurst:BiomeSavannaBiome') +
   
-  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeDesertBiome') +
-  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeGrasslandBiome') +
-  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeInterior') +
-  prior(normal(0, 1), class = 'b', coef = 'TechnologyRobberg:BiomeSavannaBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyCeramicLSA:BiomeDesertBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyCeramicLSA:BiomeGrasslandBiome') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyCeramicLSA:BiomeInterior') +
+  prior(normal(0, 1), class = 'b', coef = 'TechnologyCeramicLSA:BiomeSavannaBiome') +
   
   prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton:BiomeDesertBiome') +
   prior(normal(0, 1), class = 'b', coef = 'TechnologyWilton:BiomeGrasslandBiome') +
@@ -1074,7 +1232,7 @@ summary(fit_shape_tech_biome)
 draws <- as_draws_df(fit_shape_tech)
 
 prediction_grid <- expand_grid(
-  Technology = unique(wilton_fit$Technology)
+  Technology = unique(tech_fit$Technology)
 )
 
 eta_draws <- posterior_linpred(
@@ -1364,7 +1522,23 @@ duration_draws |>
              rep('Final LSA', 10)
          )
          
-         )
+         ) -> Prob_df
+
+Prob_df
+```
+
+```{r}
+# Produce aummary table
+table_2 <- Prob_df %>%
+  filter((Probability <= 0.10 | Probability >= 0.90)) %>%
+  select(Comparison, Technology, Probability) %>%
+  mutate(Comparison = sub("_.*", "", Comparison)) %>%
+  
+  gt() %>%
+  
+  tab_caption("Table 2: List of statistically signifcantly different comparisons between the southern African regions and the technological duration")
+
+table_2
 ```
 
 # Junks
