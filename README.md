@@ -29,7 +29,7 @@ This project tests the presumed relationship between prehistoric technologies, g
 
 ## Database
 The Southern African Radiocarbon Database (SARD) represents the largest up-to-date collection of radiocarbon data from southern Africa. This database contains information on the site names, biome, technology, and radiocarbon samples (**Figure 1**). Lombard and colleagues (2022) used a similar set of radiocarbon data to infer the most probable periods for each technological toolkit including the Robberg, Oakhurst, Wilton, and Final Later Stone Age (**Table 1**). Whereas, the SARD has the empirically observed technology at each site, **Figure 1** and **Table 1** show do not exactly line up in time or space.
-![Figure 1](Fig1.png)
+![Figure 1](/results/firgures/Fig1.png)
 ![Table 1](Table1.png)
 
 
