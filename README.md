@@ -76,3 +76,16 @@ My second hypothesis stated that duration is a function of the interaction betwe
 <br>
 <br>
 ## Regional differences
+**Table 4** shows that the savanna region is 93% probable to show a longer duration for Robberg technology than the coastal region. Since the savanna and coastal regions lie at the northern and southern end of South Africa, respectively, this may suggest that Robberg technology persisted longer in the northern portion of southern Africa than it did along the coast. This may further imply a greater need, or desire to modify technological strategies along the coastal margins before interior regions.
+<br>
+<br>
+The Oakhurst technological duration is the most variable among all technologies, except between the interior and coastal regions. Interestingly, since we expected the coastal and interior regions to show different technological trajectories, it is interesting to see that these two regions show similar Oakhurst durations. This may show a continued use of the same technological strategies between interior and coastal hunter-gatherers while other regions allowed for, or required more flexible tecnological shifts.
+<br>
+<br>
+The Wilton technology does show that the the interior duration is 91% probable to be greater than coastal use of Wilton technology. This confirms one of my initial hypotheses that there is a detectable difference in Wilton technological duration between the interior and coast. However, the hypothesis was that the coastal margins should show prolonged use of Wilton technology, but the interior provides adequate evidence towards the inverse relationship.
+<br>
+<br>
+Lastly, The Final Later Stone Age technology shows a couple of regional differences between the grassland, coastal, and savanna areas. However, the vast majority of the regions associated with the Final Later Stone Ages technology shows similar durations with differences being tied to the grassland regions, encompassing the Lesotho Highlands--South Africa's highest elevation. This may be expected given different occupation and adaptation strategies for montane regions.
+<br>
+# Conclusion
+Ultimately, I use survival curves to quantify the duration of hunter-gatherer technological strategies in southern Africa. I project my results against prior assumptions for when and where different technological toolkits should appear in southern Africa. I show that the vast majority of these previous assumptions are inaccurate. My data show a more diverse use of technological toolkits that are tied to biome-specific regions and cannot be generalized across all of southern Africa. This continues to raise questions about the validity in classifying technology into discrete categories that are non-generalizable. As a result, and as many other have done, I advocate for a different approach to describe the regional and temporal constraints of prehistoric technological trajectories that transcend the discrete classifications they currently lie in.
