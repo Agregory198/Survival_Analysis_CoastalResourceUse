@@ -43,7 +43,9 @@ I use *rcarbon* to calibrate the radiocarbon data for each site. I first separat
 ## Bayesian Models
 For the Bayesian model development, I had to grapple with the issue that the SARD technology does not end exactly within the periods set by Lombard et al. (2022). To account for this, I right-censored the data. In other words, if the technology ends after the assigned period (*ss.*, Lombard et al. (2022)), I label that site as right-censored. I then compute the duration as the difference between Lombard et al.'s (2022) classification. I add these data to a Bayesian model where I treat the duration as a censored variable as a function of technology and southern Africa's geographic ranges with a Weibull family. I treat shape as a random variable, which I model as a function of technology.
 <br>
+<br>
 I further determine southern Africa's regions via the *Biome* variable within the SARD. I chose to combine those biomes that are adjacent, similar in climate, and have low sample sizes. These include lumping the Nama-Karoo and Savanna biomes into one biome labeled *Interior*; the Succulent Karoo, Fynbos, Thicket, Forest, and Azonal biomes labeled as *Coastal*; and the Indian Ocean Coastal Belt and Grassland biomes labeled as *Grassland*.
+<br>
 <br>
 The first model simply measures the relationship between duration (right-censored) and the technology across southern Africa under a Weibull distribution. I assigned informative priors for the intercept and regression coefficients. The second model measures the relationship between duration (right-censored) and the interaction between technology and southern African biome. I similar assigned informative priors to the intercept and the regression coefficients, including the interaction terms.
 
@@ -69,6 +71,8 @@ In regards to my initial hypotheses, there is strong evidence that the Robberg t
 ## Evaluating the initial hypotheses
 My first hypothesis is that technological change and duration is a function of demographic change. Since we have predictions on population size for each technological classification, we can compare these estimates with the posterior estimates for the technological duration. Sealy (2016) suggests that Robberg and Wilton technology are associated with highly mobile, sparsely distributed populations, and the Oakhurst and Final Later Stone Age technologies are associated with greater population size and less mobile groups. My results from the first model provide evidence to refute this hypothesis. Specifically, the model shows a 95% probability that the Robberg duration is longer than the Oakhurst, the Oakhurst is 100% probable to be longer than the Wilton, which is then 100% probable to be longer than the Final Later Stone Age. Therefore, there is no relationship between the technology and estimated population sizes.
 <br>
+<br>
 My second hypothesis stated that duration is a function of the interaction between technology and southern African regions. I expected that the Robberg, Oakhurst, and Final Later Stone Age durations to be similar across all regions while the Wilton technology varied. Specifically, Sealy (2016) estimates the Wilton technology to be increasingly varied between the coastal and interior regions. My results showed that each technology had at least one significantly different technological duration, but Oakhurst showed the majority of regions were significantly different. This contradicts my initial hypothesis and shows that the Wilton technology lasted a similar duration across most regions while the Oakhurst is the period that varied.
+<br>
 <br>
 ## Regional differences
