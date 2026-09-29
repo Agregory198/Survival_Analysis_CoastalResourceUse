@@ -50,14 +50,20 @@ The first model simply measures the relationship between duration (right-censore
 # Results
 ## Model 1: Duration as a function of technolgoy
 The posterior distribution for the first model provides evidence that each technology is associated with different length of use (**Table 2**). In particular, there is a systematic decrease in the length of each technology as we get closer to the present with the Robberg assigned to a estimate mean duration of 1,735 years (CI [1,513, 1,998]) and the Final Later Stone Age at an estimated mean 547 year duration (CI [507, 598]).
-![Table 2](/results/tables/Table2.png)
+<p align="center">
+  <img src="/results/tables/Table2.png" alt="Table 2" width="500">
+</p>
 
 ## Model 2: Duration as a function of the interaction between technology and biome
 The posterior distribution for the second model confirms the hypothesis that technology duration varies by region in southern Africa (**Table 3**). The exclusion here is the Final Later Stone Age technology, which shows a similar distribution through all regions except the desert biome. However, the extremely large upper credible intervals for the desert biomes in all technological classifications showcase the low sample size within this region.
-![Table 3](/results/tables/Table3.png)
+<p align="center">
+  <img src="/results/tables/Table3.png" alt="Table 3" width="500">
+</p>
 <br>
 In regards to my initial hypotheses, there is strong evidence that the Robberg technological duration is similar across all southern African biomes except between the savanna and coastal biomes (P(Savanna duration > Coastal duration) = 0.93) (**Table 4**). In contrast, there are several significant differences for Oakhurst technological duration between southern African regions except between the desert and interior (P(Desert > Interior) = 0.82), Coastal and Interior (P(Coastal > Interior) = 0.2), and savanna and coastal (P(Savanna > Coastal) = 0.53). The Wilton technology is similar across all regions except for between the savanna and coastal biomes (P(Savanna > Coastal) = 0.91). Lastly, the Final Later Stone Age technology is similar across all regions except between the savanna and grassland (P(Savanna > Grassland) = 0.90).
-![Table 4](/results/tables/Table4.png)
+<p align="center">
+  <img src="/results/tables/Table4.png" alt="Table 4" width="500">
+</p>
 
 # Discussion
 ## Evaluating the initial hypotheses
