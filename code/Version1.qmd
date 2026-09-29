@@ -1313,6 +1313,33 @@ duration_draws |>
 ```
 
 ```{r}
+# Produce aummary table
+table_2 <- duration_summary %>%
+  mutate(Technology = factor(Technology,
+                             levels = c('Robberg', 'Oakhurst',
+                                        'Wilton', 'Final LSA'))) %>%
+  select(Technology, mean, mean_lower, mean_upper) %>%
+  filter(Technology != 'Ceramic LSA') %>%
+  arrange(Technology) %>%
+  rename(Mean = mean, `Lower CI` = mean_lower, `Upper CI` = mean_upper) %>%
+  
+  gt() %>%
+  fmt_number(
+    columns = c(Mean, `Lower CI`, `Upper CI`),
+    decimals = 2
+  ) %>%
+  
+  tab_caption("Table 2: List of the estimated technological durations and the 95% CI")
+
+# Save table to directory
+gt::gtsave(
+  data = table_2,
+  filename = 'Table2.png',
+  path = paste0(dir, '/results/tables')
+)
+```
+
+```{r}
 draws <- as_draws_df(fit_shape_tech_biome)
 
 prediction_grid <- expand_grid(
@@ -1329,8 +1356,9 @@ eta_draws <- posterior_linpred(
 scale_draws <- exp(eta_draws) |>
   as_tibble()
 
-names(scale_draws) <- paste(
+names(scale_draws) <- paste0(
   prediction_grid$Technology,
+  '_',
   prediction_grid$Biome
 )
 
@@ -1388,127 +1416,127 @@ duration_draws |>
   summarize(
     # Robberg
     'P(Sevanna > Interior)' =
-              mean(`Robberg Savanna Biome` > `Robberg Interior`),
+              mean(`Robberg_Savanna Biome` > `Robberg_Interior`),
             
     'P(Grassland > Interior)' =
-              mean(`Robberg Grassland Biome` > `Robberg Interior`),
+              mean(`Robberg_Grassland Biome` > `Robberg_Interior`),
             
     'P(Desert > Interior)' =
-              mean(`Robberg Desert Biome` > `Robberg Interior`),
+              mean(`Robberg_Desert Biome` > `Robberg_Interior`),
             
     'P(Coastal > Interior)' =
-              mean(`Robberg Coastal` > `Robberg Interior`),
+              mean(`Robberg_Coastal` > `Robberg_Interior`),
     
      'P(Sevanna > Coastal)' =
-              mean(`Robberg Savanna Biome` > `Robberg Coastal`),
+              mean(`Robberg_Savanna Biome` > `Robberg_Coastal`),
     
     'P(Grassland > Coastal)' =
-      mean(`Robberg Grassland Biome` > `Robberg Coastal`),
+      mean(`Robberg_Grassland Biome` > `Robberg_Coastal`),
     
     'P(Desert > Coastal)' =
-      mean(`Robberg Desert Biome` > `Robberg Coastal`),
+      mean(`Robberg_Desert Biome` > `Robberg_Coastal`),
     
     'P(Sevanna > Grassland)' =
-      mean(`Robberg Savanna Biome` > `Robberg Grassland Biome`),
+      mean(`Robberg_Savanna Biome` > `Robberg_Grassland Biome`),
     
     'P(Desert > Grassland)' =
-      mean(`Robberg Desert Biome` > `Robberg Grassland Biome`),
+      mean(`Robberg_Desert Biome` > `Robberg_Grassland Biome`),
     
     'P(Sevanna > Desert)' =
-      mean(`Robberg Savanna Biome` > `Robberg Desert Biome`),
+      mean(`Robberg_Savanna Biome` > `Robberg_Desert Biome`),
     
     # Oakhurst
     'P(Sevanna > Interior)_oak' =
-      mean(`Oakhurst Savanna Biome` > `Oakhurst Interior`),
+      mean(`Oakhurst_Savanna Biome` > `Oakhurst_Interior`),
     
     'P(Grassland > Interior)_oak' =
-      mean(`Oakhurst Grassland Biome` > `Oakhurst Interior`),
+      mean(`Oakhurst_Grassland Biome` > `Oakhurst_Interior`),
     
     'P(Desert > Interior)_oak' =
-      mean(`Oakhurst Desert Biome` > `Oakhurst Interior`),
+      mean(`Oakhurst_Desert Biome` > `Oakhurst_Interior`),
     
     'P(Coastal > Interior)_oak' =
-      mean(`Oakhurst Coastal` > `Oakhurst Interior`),
+      mean(`Oakhurst_Coastal` > `Oakhurst_Interior`),
     
     'P(Sevanna > Coastal)_oak' =
-      mean(`Oakhurst Savanna Biome` > `Oakhurst Coastal`),
+      mean(`Oakhurst_Savanna Biome` > `Oakhurst_Coastal`),
     
     'P(Grassland > Coastal)_oak' =
-      mean(`Oakhurst Grassland Biome` > `Oakhurst Coastal`),
+      mean(`Oakhurst_Grassland Biome` > `Oakhurst_Coastal`),
     
     'P(Desert > Coastal)_oak' =
-      mean(`Oakhurst Desert Biome` > `Oakhurst Coastal`),
+      mean(`Oakhurst_Desert Biome` > `Oakhurst_Coastal`),
     
     'P(Sevanna > Grassland)_oak' =
-      mean(`Oakhurst Savanna Biome` > `Oakhurst Grassland Biome`),
+      mean(`Oakhurst_Savanna Biome` > `Oakhurst_Grassland Biome`),
     
     'P(Desert > Grassland)_oak' =
-      mean(`Oakhurst Desert Biome` > `Oakhurst Grassland Biome`),
+      mean(`Oakhurst_Desert Biome` > `Oakhurst_Grassland Biome`),
     
     'P(Sevanna > Desert)_oak' =
-      mean(`Oakhurst Savanna Biome` > `Oakhurst Desert Biome`),
+      mean(`Oakhurst_Savanna Biome` > `Oakhurst_Desert Biome`),
     
     # Wilton
     'P(Sevanna > Interior)_wil' =
-      mean(`Wilton Savanna Biome` > `Wilton Interior`),
+      mean(`Wilton_Savanna Biome` > `Wilton_Interior`),
     
     'P(Grassland > Interior)_wil' =
-      mean(`Wilton Grassland Biome` > `Wilton Interior`),
+      mean(`Wilton_Grassland Biome` > `Wilton_Interior`),
     
     'P(Desert > Interior)_wil' =
-      mean(`Wilton Desert Biome` > `Wilton Interior`),
+      mean(`Wilton_Desert Biome` > `Wilton_Interior`),
     
     'P(Coastal > Interior)_wil' =
-      mean(`Wilton Coastal` > `Wilton Interior`),
+      mean(`Wilton_Coastal` > `Wilton_Interior`),
     
     'P(Sevanna > Coastal)_wil' =
-      mean(`Wilton Savanna Biome` > `Wilton Coastal`),
+      mean(`Wilton_Savanna Biome` > `Wilton_Coastal`),
     
     'P(Grassland > Coastal)_wil' =
-      mean(`Wilton Grassland Biome` > `Wilton Coastal`),
+      mean(`Wilton_Grassland Biome` > `Wilton_Coastal`),
     
     'P(Desert > Coastal)_wil' =
-      mean(`Wilton Desert Biome` > `Wilton Coastal`),
+      mean(`Wilton_Desert Biome` > `Wilton_Coastal`),
     
     'P(Sevanna > Grassland)_wil' =
-      mean(`Wilton Savanna Biome` > `Wilton Grassland Biome`),
+      mean(`Wilton_Savanna Biome` > `Wilton_Grassland Biome`),
     
     'P(Desert > Grassland)_wil' =
-      mean(`Wilton Desert Biome` > `Wilton Grassland Biome`),
+      mean(`Wilton_Desert Biome` > `Wilton_Grassland Biome`),
     
     'P(Sevanna > Desert)_wil' =
-      mean(`Wilton Savanna Biome` > `Wilton Desert Biome`),
+      mean(`Wilton_Savanna Biome` > `Wilton_Desert Biome`),
     
     # Final LSA
     'P(Sevanna > Interior)_fin' =
-      mean(`Final LSA Savanna Biome` > `Final LSA Interior`),
+      mean(`Final LSA_Savanna Biome` > `Final LSA_Interior`),
     
     'P(Grassland > Interior)_fin' =
-      mean(`Final LSA Grassland Biome` > `Final LSA Interior`),
+      mean(`Final LSA_Grassland Biome` > `Final LSA_Interior`),
     
     'P(Desert > Interior)_fin' =
-      mean(`Final LSA Desert Biome` > `Final LSA Interior`),
+      mean(`Final LSA_Desert Biome` > `Final LSA_Interior`),
     
     'P(Coastal > Interior)_fin' =
-      mean(`Final LSA Coastal` > `Final LSA Interior`),
+      mean(`Final LSA_Coastal` > `Final LSA_Interior`),
     
     'P(Sevanna > Coastal)_fin' =
-      mean(`Final LSA Savanna Biome` > `Final LSA Coastal`),
+      mean(`Final LSA_Savanna Biome` > `Final LSA_Coastal`),
     
     'P(Grassland > Coastal)_fin' =
-      mean(`Final LSA Grassland Biome` > `Final LSA Coastal`),
+      mean(`Final LSA_Grassland Biome` > `Final LSA_Coastal`),
     
     'P(Desert > Coastal)_fin' =
-      mean(`Final LSA Desert Biome` > `Final LSA Coastal`),
+      mean(`Final LSA_Desert Biome` > `Final LSA_Coastal`),
     
     'P(Sevanna > Grassland)_fin' =
-      mean(`Final LSA Savanna Biome` > `Final LSA Grassland Biome`),
+      mean(`Final LSA_Savanna Biome` > `Final LSA_Grassland Biome`),
     
     'P(Desert > Grassland)_fin' =
-      mean(`Final LSA Desert Biome` > `Final LSA Grassland Biome`),
+      mean(`Final LSA_Desert Biome` > `Final LSA_Grassland Biome`),
     
     'P(Sevanna > Desert)_fin' =
-      mean(`Final LSA Savanna Biome` > `Final LSA Desert Biome`)
+      mean(`Final LSA_Savanna Biome` > `Final LSA_Desert Biome`)
     
     ) |>
   pivot_longer('P(Sevanna > Interior)':'P(Sevanna > Desert)_fin',
@@ -1529,16 +1557,58 @@ Prob_df
 
 ```{r}
 # Produce aummary table
-table_2 <- Prob_df %>%
+table_3 <- duration_summary %>%
+  select(`Technology-Biome`, mean, mean_lower, mean_upper) %>%
+  separate_wider_delim(cols = `Technology-Biome`,
+                       delim = "_", names = c("Technology", "Biome")) %>%
+  filter(Technology != 'Ceramic LSA') %>%
+  mutate(Technology = factor(Technology,
+                             levels = c('Robberg', 'Oakhurst',
+                                        'Wilton', 'Final LSA')),
+         Biome = str_replace(Biome, 'Sevanna', 'Savanna')) %>%
+  rename(Mean = mean, `Lower CI` = mean_lower, `Upper CI` = mean_upper) %>%
+  arrange(Technology) %>%
+  
+  gt() %>%
+  fmt_number(
+    columns = c(Mean, `Lower CI`, `Upper CI`),
+    decimals = 2
+  ) %>%
+  
+  tab_caption("Table 3: List of the estimated technological durations by biome and the 95% CI")
+
+# Save table to directory
+gt::gtsave(
+  data = table_3,
+  filename = 'Table3.png',
+  path = paste0(dir, '/results/tables')
+)
+
+
+# Produce aummary table
+table_4 <- Prob_df %>%
   filter((Probability <= 0.10 | Probability >= 0.90)) %>%
   select(Comparison, Technology, Probability) %>%
-  mutate(Comparison = sub("_.*", "", Comparison)) %>%
+  mutate(Technology = factor(Technology,
+                             levels = c('Robberg', 'Oakhurst',
+                                        'Wilton', 'Final LSA'))) %>%
+  mutate(Comparison = sub("_.*", "", Comparison),
+         Comparison = str_replace(Comparison, 'Sevanna', 'Savanna')) %>%
+  arrange(Technology) %>%
   
   gt() %>%
   
-  tab_caption("Table 2: List of statistically signifcantly different comparisons between the southern African regions and the technological duration")
+  tab_caption("Table 4: List of statistically signifcantly different comparisons between the southern African regions and the technological duration")
 
-table_2
+# Save table to directory
+gt::gtsave(
+  data = table_4,
+  filename = 'Table4.png',
+  path = paste0(dir, '/results/tables')
+)
+
+table_4
+
 ```
 
 # Junks
